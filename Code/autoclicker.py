@@ -1,479 +1,760 @@
-# Author: Synctic
-# License: MIT | Copyright (c) 2022 Synctic
-# Version: 1.05
-
-from PIL import Image, ImageTk
-from pynput.keyboard import *
-from pynput.keyboard import Key, Listener
-from pynput import keyboard
-import pydirectinput
-import sys
+from pynput.keyboard import Key, KeyCode, Listener
+import customtkinter
+import json
 import os
 import pydirectinput
-import customtkinter
-import threading
 import spinbox as spinbox
-
-autoclick_key = Key.f5
-holdm_key = Key.f6
-
-button1 = "Left"
-clicktype = "Single"
-repeattype = 1
+import sys
+import threading
+import time
+import webbrowser
 
 
 class App(customtkinter.CTk):
-    auto = False
-    auto1 = False
+    WIDTH = 470
+    HEIGHT = 700
 
-    WIDTH = 315
-    HEIGHT = 440
-
-    global resource
-
+    @staticmethod
     def resource(relative_path):
-        base_path = getattr(sys, "_MEIPASS", os.path.dirname(
-            os.path.abspath(__file__)))
+        base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
         return os.path.join(base_path, relative_path)
-
-    customtkinter.set_appearance_mode("dark")
-    customtkinter.set_default_color_theme("blue")
 
     def __init__(self):
         super().__init__()
 
+        customtkinter.set_appearance_mode("dark")
+        customtkinter.set_default_color_theme("blue")
+        pydirectinput.PAUSE = 0
+
         self.title("AutoClicker")
         self.geometry(f"{self.WIDTH}x{self.HEIGHT}")
-
-        self.p1 = ImageTk.PhotoImage(file=resource("../Assets/icon.ico"))
-        self.wm_iconbitmap()
-        self.iconphoto(False, self.p1)
-
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-
-        self.frame = customtkinter.CTkFrame(master=self)
-        self.frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-
-        self.frame.grid_columnconfigure(0, weight=1)
-        self.frame.grid_columnconfigure(1, weight=1)
-        self.frame.grid_columnconfigure(5, weight=1)
-
-        self.title = customtkinter.CTkLabel(
-            master=self.frame, text="AutoClicker", font=("Roboto Medium", -16)
-        )
-        self.title.grid(row=1, column=1, pady=10)
+        self.resizable(False, False)
+        self.attributes("-topmost", True)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        self.start_auto_button = customtkinter.CTkButton(
-            master=self.frame,
-            text="Start",
-            fg_color=("black"),
-            font=("Roboto Medium", -16),
-            command=self.start_button,
+        self.running_mode = None
+        self.stop_event = threading.Event()
+        self.worker_thread = None
+        self.listener = None
+        self.started_at = None
+        self.total_actions = 0
+
+        self.preset_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presets.json")
+
+        self.button_var = customtkinter.StringVar(value="Left")
+        self.clicktype_var = customtkinter.StringVar(value="Single")
+        self.interval_var = customtkinter.StringVar(value="0.01")
+        self.delay_var = customtkinter.StringVar(value="0")
+        self.repeat_mode_var = customtkinter.StringVar(value="Until Stopped")
+        self.theme_var = customtkinter.StringVar(value="Dark")
+        self.keyboard_key_var = customtkinter.StringVar(value="w")
+        self.hotkey_click_var = customtkinter.StringVar(value="f5")
+        self.hotkey_hold_var = customtkinter.StringVar(value="f6")
+        self.preset_name_var = customtkinter.StringVar(value="")
+        self.preset_selected_var = customtkinter.StringVar(value="Select preset")
+
+        self.topmost_var = customtkinter.BooleanVar(value=True)
+        self.status_var = customtkinter.StringVar(value="Idle")
+        self.total_actions_var = customtkinter.StringVar(value="0")
+        self.runtime_var = customtkinter.StringVar(value="0.0s")
+        self.hotkey_click = Key.f5
+        self.hotkey_hold = Key.f6
+        self.credits_window = None
+
+        self.build_ui()
+        self.apply_hotkeys(show_status=False)
+        self.refresh_presets()
+        self.start_global_hotkeys()
+        self.update_runtime()
+
+    def build_ui(self):
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        self.container = customtkinter.CTkFrame(self)
+        self.container.grid(row=0, column=0, sticky="nsew", padx=12, pady=12)
+        self.container.grid_columnconfigure(0, weight=1)
+
+        header = customtkinter.CTkFrame(self.container)
+        header.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 8))
+        header.grid_columnconfigure(0, weight=0)
+        header.grid_columnconfigure(1, weight=1)
+
+        self.menu_button = customtkinter.CTkButton(
+            header,
+            text="☰",
+            width=38,
+            command=self.open_credits,
+            font=("Roboto Medium", 18),
         )
-        self.start_auto_button.place(x=80, y=280)
+        self.menu_button.grid(row=0, column=0, sticky="nw", padx=(12, 2), pady=(10, 0))
+
+        title = customtkinter.CTkLabel(header, text="AutoClicker", font=("Roboto Medium", 24))
+        title.grid(row=0, column=1, sticky="w", padx=12, pady=(10, 2))
+
+        self.subtitle_label = customtkinter.CTkLabel(
+            header,
+            text="Click: F5  •  Hold: F6",
+            font=("Roboto Medium", 13),
+        )
+        self.subtitle_label.grid(row=1, column=1, sticky="w", padx=12, pady=(0, 4))
+
+        watermark = customtkinter.CTkLabel(
+            header,
+            text="it is me zed",
+            font=("Roboto Medium", 12),
+            text_color=("gray40", "gray70"),
+        )
+        watermark.grid(row=2, column=1, sticky="e", padx=12, pady=(0, 10))
+
+        controls = customtkinter.CTkFrame(self.container)
+        controls.grid(row=1, column=0, sticky="ew", padx=10, pady=8)
+        controls.grid_columnconfigure((0, 1), weight=1)
+
+        self.start_auto_button = customtkinter.CTkButton(
+            controls,
+            text="Start",
+            command=self.start_button,
+            font=("Roboto Medium", 15),
+        )
+        self.start_auto_button.grid(row=0, column=0, padx=(12, 6), pady=12, sticky="ew")
 
         self.stop_auto_button = customtkinter.CTkButton(
-            master=self.frame,
+            controls,
             text="Stop",
-            fg_color=("black"),
-            font=("Roboto Medium", -16),
             state="disabled",
             command=self.stop_button,
+            font=("Roboto Medium", 15),
         )
-        self.stop_auto_button.place(x=80, y=315)
+        self.stop_auto_button.grid(row=0, column=1, padx=(6, 12), pady=12, sticky="ew")
 
-        self.buttonmenu_var = customtkinter.StringVar(value="Left")
+        config_frame = customtkinter.CTkFrame(self.container)
+        config_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=8)
+        config_frame.grid_columnconfigure((0, 1), weight=1)
+
+        customtkinter.CTkLabel(config_frame, text="Button", font=("Roboto Medium", 13)).grid(
+            row=0, column=0, sticky="w", padx=12, pady=(10, 0)
+        )
+        customtkinter.CTkLabel(config_frame, text="Click Type", font=("Roboto Medium", 13)).grid(
+            row=0, column=1, sticky="w", padx=12, pady=(10, 0)
+        )
 
         self.buttonmenu = customtkinter.CTkComboBox(
-            master=self.frame,
-            font=("Roboto Medium", -14),
-            width=115,
-            fg_color="black",
-            button_color="black",
-            variable=self.buttonmenu_var,
-            command=self.buttonmenu_event,
-            values=["Left", "Middle", "Right"],
+            config_frame,
+            variable=self.button_var,
+            values=["Left", "Middle", "Right", "Keyboard"],
+            command=self.on_button_change,
         )
-        self.buttonmenu.place(x=20, y=90)
-
-        self.buttonmenu.bind("<Return>", lambda e: self.custombutton())
-
-        self.buttontxt = customtkinter.CTkLabel(
-            master=self.frame, text="Button:", font=("Roboto Medium", -15)
-        )
-        self.buttontxt.place(x=46, y=60)
-
-        self.clicktype_var = customtkinter.StringVar(value="Single")
+        self.buttonmenu.grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 10))
 
         self.clicktypemenu = customtkinter.CTkOptionMenu(
-            master=self.frame,
-            font=("Roboto Medium", -14),
-            width=115,
-            fg_color="black",
-            button_color="black",
+            config_frame,
             variable=self.clicktype_var,
-            command=self.clicktype_event,
             values=["Single", "Double", "Triple", "Hold"],
         )
-        self.clicktypemenu.place(x=160, y=90)
+        self.clicktypemenu.grid(row=1, column=1, sticky="ew", padx=12, pady=(4, 10))
 
-        self.clicktypetxt = customtkinter.CTkLabel(
-            master=self.frame, text="Click Type:", font=("Roboto Medium", -15)
+        customtkinter.CTkLabel(config_frame, text="Keyboard Key", font=("Roboto Medium", 13)).grid(
+            row=2, column=0, sticky="w", padx=12, pady=(2, 0)
         )
-        self.clicktypetxt.place(x=180, y=60)
+        self.key_entry = customtkinter.CTkEntry(config_frame, textvariable=self.keyboard_key_var)
+        self.key_entry.grid(row=3, column=0, sticky="ew", padx=12, pady=(4, 12))
 
-        self.clickinterval_var = customtkinter.StringVar(
-            master=self.frame, value=str(0.01)
+        timing_frame = customtkinter.CTkFrame(self.container)
+        timing_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=8)
+        timing_frame.grid_columnconfigure((0, 1), weight=1)
+
+        customtkinter.CTkLabel(timing_frame, text="Interval (s)", font=("Roboto Medium", 13)).grid(
+            row=0, column=0, sticky="w", padx=12, pady=(10, 0)
+        )
+        customtkinter.CTkLabel(timing_frame, text="Start Delay (s)", font=("Roboto Medium", 13)).grid(
+            row=0, column=1, sticky="w", padx=12, pady=(10, 0)
         )
 
-        self.clickinterval = customtkinter.CTkEntry(
-            master=self.frame,
-            font=("Roboto Medium", -14),
-            width=80,
-            textvariable=self.clickinterval_var,
+        self.clickinterval = customtkinter.CTkEntry(timing_frame, textvariable=self.interval_var)
+        self.clickinterval.grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 12))
+
+        self.delay_entry = customtkinter.CTkEntry(timing_frame, textvariable=self.delay_var)
+        self.delay_entry.grid(row=1, column=1, sticky="ew", padx=12, pady=(4, 12))
+
+        repeat_frame = customtkinter.CTkFrame(self.container)
+        repeat_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=8)
+        repeat_frame.grid_columnconfigure((0, 1), weight=1)
+
+        self.repeat_until = customtkinter.CTkRadioButton(
+            repeat_frame,
+            text="Until Stopped",
+            variable=self.repeat_mode_var,
+            value="Until Stopped",
         )
-        self.clickinterval.place(x=110, y=380)
+        self.repeat_until.grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
 
-        self.clickintervaltxt = customtkinter.CTkLabel(
-            master=self.frame, text="Click interval", font=("Roboto Medium", -14)
+        self.repeat_times = customtkinter.CTkRadioButton(
+            repeat_frame,
+            text="Repeat Count",
+            variable=self.repeat_mode_var,
+            value="Repeat Count",
         )
-        self.clickintervaltxt.place(x=108, y=350)
+        self.repeat_times.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 10))
 
-        self.secondstxt = customtkinter.CTkLabel(
-            master=self.frame, text="secs", font=("Roboto Medium", -13), width=10
-        )
-        self.secondstxt.place(x=195, y=385)
-
-        self.repeat_var = customtkinter.IntVar()
-        self.repeat_var.set(value=1)
-
-        self.repeat = customtkinter.CTkRadioButton(
-            master=self.frame,
-            text="Repeat",
-            value=0,
-            variable=self.repeat_var,
-            command=self.repeat_event,
-            font=("Roboto Medium", -13),
-            width=20,
-            height=20,
-        )
-        self.repeat.place(x=20, y=140)
-
-        self.repeatstopped = customtkinter.CTkRadioButton(
-            master=self.frame,
-            text="Repeat until stopped",
-            value=1,
-            variable=self.repeat_var,
-            command=self.repeat_event,
-            font=("Roboto Medium", -13),
-            width=20,
-            height=20,
-        )
-        self.repeatstopped.place(x=20, y=170)
-
-        self.repeattimes = spinbox.FloatSpinbox(
-            master=self.frame, width=105, height=25, step_size=1
-        )
-        self.repeattimes.place(x=160, y=135)
-
-        self.lis2 = keyboard.Listener(on_press=self.on_press1)
-        self.lis2.start()
-
+        self.repeattimes = spinbox.FloatSpinbox(repeat_frame, width=130, height=30, step_size=1)
+        self.repeattimes.grid(row=0, column=1, rowspan=2, sticky="e", padx=12, pady=12)
         self.repeattimes.set(1)
-        self.repeatstopped.select()
 
-    def buttonmenu_event(self, choice5):
-        global button1
-        self.choice5 = choice5
+        hotkey_frame = customtkinter.CTkFrame(self.container)
+        hotkey_frame.grid(row=5, column=0, sticky="ew", padx=10, pady=8)
+        hotkey_frame.grid_columnconfigure((0, 1, 2), weight=1)
 
-        if self.choice5 == "Left":
-            button1 = "Left"
-        elif self.choice5 == "Middle":
-            button1 = "Middle"
-        elif self.choice5 == "Right":
-            button1 = "Right"
+        customtkinter.CTkLabel(hotkey_frame, text="Toggle Click Hotkey", font=("Roboto Medium", 13)).grid(
+            row=0, column=0, sticky="w", padx=12, pady=(10, 0)
+        )
+        customtkinter.CTkLabel(hotkey_frame, text="Toggle Hold Hotkey", font=("Roboto Medium", 13)).grid(
+            row=0, column=1, sticky="w", padx=12, pady=(10, 0)
+        )
 
-    def custombutton(self):
-        global button1
-        button1 = self.buttonmenu_var.get()
-        self.frame.focus_set()
+        self.hotkey_click_entry = customtkinter.CTkEntry(hotkey_frame, textvariable=self.hotkey_click_var)
+        self.hotkey_click_entry.grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 10))
 
-    def clicktype_event(self, choice):
-        global clicktype
+        self.hotkey_hold_entry = customtkinter.CTkEntry(hotkey_frame, textvariable=self.hotkey_hold_var)
+        self.hotkey_hold_entry.grid(row=1, column=1, sticky="ew", padx=12, pady=(4, 10))
 
-        if choice == "Single":
-            clicktype = "Single"
-        elif choice == "Double":
-            clicktype = "Double"
-        elif choice == "Triple":
-            clicktype = "Triple"
-        elif choice == "Hold":
-            clicktype = "Hold"
+        self.apply_hotkey_btn = customtkinter.CTkButton(hotkey_frame, text="Apply", command=self.apply_hotkeys)
+        self.apply_hotkey_btn.grid(row=1, column=2, sticky="ew", padx=12, pady=(4, 10))
 
-    def repeat_event(self):
-        global repeattype
+        extras_frame = customtkinter.CTkFrame(self.container)
+        extras_frame.grid(row=6, column=0, sticky="ew", padx=10, pady=8)
+        extras_frame.grid_columnconfigure((0, 1), weight=1)
 
-        if self.repeat_var.get() == 0:
-            repeattype = 0
-        if self.repeat_var.get() == 1:
-            repeattype = 1
+        customtkinter.CTkLabel(extras_frame, text="Theme", font=("Roboto Medium", 13)).grid(
+            row=0, column=0, sticky="w", padx=12, pady=(10, 0)
+        )
+        self.theme_menu = customtkinter.CTkOptionMenu(
+            extras_frame,
+            variable=self.theme_var,
+            values=["Dark", "Light", "System"],
+            command=self.change_theme,
+        )
+        self.theme_menu.grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 10))
+
+        self.topmost_switch = customtkinter.CTkSwitch(
+            extras_frame,
+            text="Always on top",
+            variable=self.topmost_var,
+            command=self.toggle_topmost,
+        )
+        self.topmost_switch.select()
+        self.topmost_switch.grid(row=1, column=1, sticky="w", padx=12, pady=(4, 10))
+
+        presets_frame = customtkinter.CTkFrame(self.container)
+        presets_frame.grid(row=7, column=0, sticky="ew", padx=10, pady=8)
+        presets_frame.grid_columnconfigure((0, 1, 2), weight=1)
+
+        customtkinter.CTkLabel(presets_frame, text="Presets", font=("Roboto Medium", 13)).grid(
+            row=0, column=0, sticky="w", padx=12, pady=(10, 0)
+        )
+
+        self.preset_entry = customtkinter.CTkEntry(presets_frame, textvariable=self.preset_name_var, placeholder_text="Preset name")
+        self.preset_entry.grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 10))
+
+        self.preset_select = customtkinter.CTkComboBox(
+            presets_frame,
+            variable=self.preset_selected_var,
+            values=["Select preset"],
+            command=self.load_preset,
+            state="readonly",
+        )
+        self.preset_select.grid(row=1, column=1, sticky="ew", padx=12, pady=(4, 10))
+
+        self.save_preset_btn = customtkinter.CTkButton(presets_frame, text="Save", command=self.save_preset)
+        self.save_preset_btn.grid(row=1, column=2, sticky="ew", padx=12, pady=(4, 10))
+
+        stats_frame = customtkinter.CTkFrame(self.container)
+        stats_frame.grid(row=8, column=0, sticky="ew", padx=10, pady=(8, 10))
+        stats_frame.grid_columnconfigure((0, 1, 2), weight=1)
+
+        customtkinter.CTkLabel(stats_frame, text="Status", font=("Roboto Medium", 13)).grid(
+            row=0, column=0, padx=12, pady=(10, 0), sticky="w"
+        )
+        customtkinter.CTkLabel(stats_frame, text="Total Actions", font=("Roboto Medium", 13)).grid(
+            row=0, column=1, padx=12, pady=(10, 0), sticky="w"
+        )
+        customtkinter.CTkLabel(stats_frame, text="Runtime", font=("Roboto Medium", 13)).grid(
+            row=0, column=2, padx=12, pady=(10, 0), sticky="w"
+        )
+
+        customtkinter.CTkLabel(stats_frame, textvariable=self.status_var).grid(
+            row=1, column=0, padx=12, pady=(4, 12), sticky="w"
+        )
+        customtkinter.CTkLabel(stats_frame, textvariable=self.total_actions_var).grid(
+            row=1, column=1, padx=12, pady=(4, 12), sticky="w"
+        )
+        customtkinter.CTkLabel(stats_frame, textvariable=self.runtime_var).grid(
+            row=1, column=2, padx=12, pady=(4, 12), sticky="w"
+        )
+
+        self.on_button_change(self.button_var.get())
+
+    def parse_float(self, value, fallback, minimum=None, maximum=None):
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            parsed = fallback
+
+        if minimum is not None:
+            parsed = max(minimum, parsed)
+        if maximum is not None:
+            parsed = min(maximum, parsed)
+        return parsed
+
+    def parse_repeat_count(self):
+        raw_value = self.repeattimes.get()
+        if raw_value is None:
+            return 1
+        return max(1, int(raw_value))
+
+    def change_theme(self, selected):
+        customtkinter.set_appearance_mode(selected.lower())
+
+    def toggle_topmost(self):
+        self.attributes("-topmost", bool(self.topmost_var.get()))
+
+    def parse_hotkey(self, value):
+        if value is None:
+            return None
+
+        token = str(value).strip().lower()
+        if not token:
+            return None
+
+        if token.startswith("key."):
+            token = token[4:]
+
+        aliases = {
+            "esc": "escape",
+            "return": "enter",
+            "control": "ctrl",
+            "pgup": "page_up",
+            "pgdn": "page_down",
+        }
+        token = aliases.get(token, token)
+
+        named_keys = {
+            "space": Key.space,
+            "enter": Key.enter,
+            "tab": Key.tab,
+            "backspace": Key.backspace,
+            "delete": Key.delete,
+            "insert": Key.insert,
+            "home": Key.home,
+            "end": Key.end,
+            "page_up": Key.page_up,
+            "page_down": Key.page_down,
+            "up": Key.up,
+            "down": Key.down,
+            "left": Key.left,
+            "right": Key.right,
+            "shift": Key.shift,
+            "ctrl": Key.ctrl,
+            "alt": Key.alt,
+            "caps_lock": Key.caps_lock,
+            "num_lock": Key.num_lock,
+            "scroll_lock": Key.scroll_lock,
+            "pause": Key.pause,
+            "print_screen": Key.print_screen,
+            "menu": Key.menu,
+            "cmd": Key.cmd,
+        }
+
+        if token in named_keys:
+            return named_keys[token]
+
+        if token.startswith("f") and token[1:].isdigit():
+            number = int(token[1:])
+            if 1 <= number <= 20:
+                return getattr(Key, f"f{number}")
+
+        if len(token) == 1:
+            return KeyCode.from_char(token)
+
+        return None
+
+    def hotkey_matches(self, pressed, configured):
+        if isinstance(configured, Key):
+            return pressed == configured
+
+        if isinstance(configured, KeyCode):
+            if not isinstance(pressed, KeyCode):
+                return False
+            if pressed.char is None or configured.char is None:
+                return pressed == configured
+            return pressed.char.lower() == configured.char.lower()
+
+        return False
+
+    def format_hotkey(self, value):
+        return value.strip().upper() if value.strip() else "?"
+
+    def update_hotkey_subtitle(self):
+        self.subtitle_label.configure(
+            text=f"Click: {self.format_hotkey(self.hotkey_click_var.get())}  •  Hold: {self.format_hotkey(self.hotkey_hold_var.get())}"
+        )
+
+    def apply_hotkeys(self, show_status=True):
+        click_text = self.hotkey_click_var.get().strip().lower() or "f5"
+        hold_text = self.hotkey_hold_var.get().strip().lower() or "f6"
+
+        click_key = self.parse_hotkey(click_text)
+        hold_key = self.parse_hotkey(hold_text)
+
+        if click_key is None or hold_key is None:
+            if show_status:
+                self.status_var.set("Invalid hotkey. Example: f5, g, space")
+            return
+
+        if click_text == hold_text:
+            if show_status:
+                self.status_var.set("Hotkeys must be different")
+            return
+
+        self.hotkey_click_var.set(click_text)
+        self.hotkey_hold_var.set(hold_text)
+        self.hotkey_click = click_key
+        self.hotkey_hold = hold_key
+        self.update_hotkey_subtitle()
+
+        if show_status:
+            self.status_var.set("Hotkeys updated")
+
+    def on_button_change(self, selected):
+        if selected == "Keyboard":
+            self.key_entry.configure(state="normal")
+        else:
+            self.key_entry.configure(state="disabled")
+
+    def start_global_hotkeys(self):
+        self.listener = Listener(on_press=self.on_global_press)
+        self.listener.start()
+
+    def on_global_press(self, key):
+        if self.hotkey_matches(key, self.hotkey_click):
+            if self.running_mode == "click":
+                self.stop_button()
+            elif self.running_mode is None:
+                self.start_click_mode()
+            return
+
+        if self.hotkey_matches(key, self.hotkey_hold):
+            if self.running_mode == "hold":
+                self.stop_button()
+            elif self.running_mode is None:
+                self.start_hold_mode()
+
+    def update_runtime(self):
+        if self.started_at is None:
+            self.runtime_var.set("0.0s")
+        else:
+            elapsed = time.monotonic() - self.started_at
+            self.runtime_var.set(f"{elapsed:.1f}s")
+        self.after(200, self.update_runtime)
+
+    def get_target(self):
+        target = self.button_var.get()
+        if target == "Keyboard":
+            key = self.keyboard_key_var.get().strip().lower()
+            if not key:
+                return "w"
+            return key
+        return target.lower()
+
+    def set_running_ui_state(self, is_running):
+        if is_running:
+            self.buttonmenu.configure(state="disabled")
+            self.clicktypemenu.configure(state="disabled")
+            self.clickinterval.configure(state="disabled")
+            self.delay_entry.configure(state="disabled")
+            self.repeattimes.configure(state="disabled")
+            self.start_auto_button.configure(state="disabled")
+            self.stop_auto_button.configure(state="normal")
+            self.key_entry.configure(state="disabled")
+            self.hotkey_click_entry.configure(state="disabled")
+            self.hotkey_hold_entry.configure(state="disabled")
+            self.apply_hotkey_btn.configure(state="disabled")
+            self.status_var.set("Running")
+            self.started_at = time.monotonic()
+        else:
+            self.buttonmenu.configure(state="normal")
+            self.clicktypemenu.configure(state="normal")
+            self.clickinterval.configure(state="normal")
+            self.delay_entry.configure(state="normal")
+            self.repeattimes.configure(state="normal")
+            self.start_auto_button.configure(state="normal")
+            self.stop_auto_button.configure(state="disabled")
+            self.on_button_change(self.button_var.get())
+            self.hotkey_click_entry.configure(state="normal")
+            self.hotkey_hold_entry.configure(state="normal")
+            self.apply_hotkey_btn.configure(state="normal")
+            if self.status_var.get() != "Saved preset":
+                self.status_var.set("Idle")
+            self.started_at = None
 
     def start_button(self):
-        if (
-            clicktype == "Single"
-            or clicktype == "Double"
-            or clicktype == "Triple"
-            and not self.pause
-        ):
-            self.lis2.stop()
-            self.pause = False
+        if self.running_mode is not None:
+            return
 
-            self.autoclc = threading.Thread(target=self.autoClick)
-            self.autoclc.start()
-
-            self.buttonmenu.configure(state="normal")
-            self.buttonmenu.configure(state="disabled")
-            self.start_auto_button.configure(state="disabled")
-            self.stop_auto_button.configure(state="enabled")
+        if self.clicktype_var.get() == "Hold":
+            self.start_hold_mode()
         else:
-            if not self.pause:
-                self.lis2.stop()
-                self.pause = False
+            self.start_click_mode()
 
-                self.autohol = threading.Thread(target=self.autoHold)
-                self.autohol.start()
+    def start_click_mode(self):
+        if self.running_mode is not None:
+            return
 
-                self.buttonmenu.configure(state="normal")
-                self.buttonmenu.configure(state="disabled")
-                self.start_auto_button.configure(state="disabled")
-                self.stop_auto_button.configure(state="enabled")
+        interval = self.parse_float(self.interval_var.get(), 0.01, minimum=0.001)
+        delay = self.parse_float(self.delay_var.get(), 0.0, minimum=0.0, maximum=30.0)
+        click_type = self.clicktype_var.get()
+        if click_type == "Hold":
+            click_type = "Single"
 
-    def on_press1(self, key):
-        if not self.auto1 and key == autoclick_key:
-            self.pause = False
-            self.auto1 = True
-            self.auto = False
-            self.lis2.stop()
-            self.start_button()
+        repeat_count = None
+        if self.repeat_mode_var.get() == "Repeat Count":
+            repeat_count = self.parse_repeat_count()
 
-        if not self.auto and key == holdm_key:
-            self.pause = False
-            self.lis2.stop()
-            self.start_button()
-            self.auto1 = True
+        self.stop_event.clear()
+        self.running_mode = "click"
+        self.set_running_ui_state(True)
+        self.status_var.set("Running click mode")
 
-    def on_press(self, key):
-        if self.auto1 and key == autoclick_key:
-            self.pause = True
-            self.auto1 = False
-            self.stop_button()
-            self.lis2 = keyboard.Listener(on_press=self.on_press1)
-            self.lis2.start()
+        self.worker_thread = threading.Thread(
+            target=self.click_worker,
+            args=(click_type, interval, delay, repeat_count),
+            daemon=True,
+        )
+        self.worker_thread.start()
 
-        if self.auto and key == holdm_key:
-            self.pause = True
-            self.auto = False
-            self.stop_button()
-            self.lis2 = keyboard.Listener(on_press=self.on_press1)
-            self.lis2.start()
+    def start_hold_mode(self):
+        if self.running_mode is not None:
+            return
 
-    def autoHold(self):
-        self.auto = True
-        self.auto1 = False
-        self.pause = False
+        delay = self.parse_float(self.delay_var.get(), 0.0, minimum=0.0, maximum=30.0)
+        self.stop_event.clear()
+        self.running_mode = "hold"
+        self.set_running_ui_state(True)
+        self.status_var.set("Running hold mode")
 
-        lis = Listener(on_press=self.on_press)
-        lis.start()
+        self.worker_thread = threading.Thread(
+            target=self.hold_worker,
+            args=(delay,),
+            daemon=True,
+        )
+        self.worker_thread.start()
 
-        while self.auto:
-            if not self.pause:
-                if button1 == "Left":
-                    pydirectinput.mouseDown(button="left")
-                elif button1 == "Middle":
-                    pydirectinput.mouseDown(button="middle")
-                elif button1 == "Right":
-                    pydirectinput.mouseDown(button="right")
-                else:
-                    pydirectinput.keyDown(keys=self.buttonmenu.get().lower())
-                    pydirectinput.PAUSE = self.interval
+    def perform_click(self, click_type, target):
+        if click_type == "Single":
+            count = 1
+        elif click_type == "Double":
+            count = 2
+        else:
+            count = 3
 
-            if self.pause:
-                self.autohol.join()
+        if target in {"left", "middle", "right"}:
+            for _ in range(count):
+                pydirectinput.click(button=target)
+                self.total_actions += 1
+        else:
+            for _ in range(count):
+                pydirectinput.press(target)
+                self.total_actions += 1
+
+        self.total_actions_var.set(str(self.total_actions))
+
+    def click_worker(self, click_type, interval, delay, repeat_count):
+        if delay > 0:
+            started = time.monotonic()
+            while not self.stop_event.is_set() and time.monotonic() - started < delay:
+                time.sleep(0.02)
+
+        target = self.get_target()
+        completed = 0
+
+        while not self.stop_event.is_set():
+            self.perform_click(click_type, target)
+            completed += 1
+
+            if repeat_count is not None and completed >= repeat_count:
                 break
-        lis.stop()
 
-    def autoClick(self):
-        self.auto = False
-        self.auto1 = True
-        self.pause = False
+            sleep_for = interval
+            started = time.monotonic()
+            while not self.stop_event.is_set() and time.monotonic() - started < sleep_for:
+                time.sleep(0.002)
 
-        lis1 = Listener(on_press=self.on_press)
-        lis1.start()
+        self.after(0, self.stop_button, True)
 
-        self.interval = float(self.clickinterval.get())
-        if repeattype == 1:
-            while self.auto1:
-                if not self.pause:
-                    if clicktype == "Single":
-                        if self.buttonmenu.get() == "Left":
-                            pydirectinput.click(button="left")
-                            pydirectinput.PAUSE = self.interval
-                        elif self.buttonmenu.get() == "Middle":
-                            pydirectinput.click(button="middle")
-                            pydirectinput.PAUSE = self.interval
-                        elif self.buttonmenu.get() == "Right":
-                            pydirectinput.click(button="right")
-                            pydirectinput.PAUSE = self.interval
-                        else:
-                            pydirectinput.press(
-                                keys=self.buttonmenu.get().lower())
-                            pydirectinput.PAUSE = self.interval
+    def hold_worker(self, delay):
+        if delay > 0:
+            started = time.monotonic()
+            while not self.stop_event.is_set() and time.monotonic() - started < delay:
+                time.sleep(0.02)
 
-                    if clicktype == "Double":
-                        if button1 == "Left":
-                            pydirectinput.doubleClick(button="left")
-                            pydirectinput.PAUSE = self.interval
-                        elif button1 == "Middle":
-                            pydirectinput.doubleClick(button="middle")
-                            pydirectinput.PAUSE = self.interval
-                        elif button1 == "Right":
-                            pydirectinput.doubleClick(button="right")
-                            pydirectinput.PAUSE = self.interval
-                        else:
-                            pydirectinput.press(
-                                keys=self.buttonmenu.get().lower())
-                            pydirectinput.PAUSE = self.interval
-
-                    if clicktype == "Triple":
-                        if button1 == "Left":
-                            pydirectinput.tripleClick(button="left")
-                            pydirectinput.PAUSE = self.interval
-                        elif button1 == "Middle":
-                            pydirectinput.tripleClick(button="middle")
-                            pydirectinput.PAUSE = self.interval
-                        elif button1 == "Right":
-                            pydirectinput.tripleClick(button="right")
-                            pydirectinput.PAUSE = self.interval
-                        else:
-                            pydirectinput.press(
-                                keys=self.buttonmenu.get().lower())
-                            pydirectinput.PAUSE = self.interval
-                if self.pause:
-                    break
+        target = self.get_target()
+        if target in {"left", "middle", "right"}:
+            pydirectinput.mouseDown(button=target)
         else:
-            for i in range(int(self.repeattimes.get()) + 1):
-                if not self.pause:
-                    if clicktype == "Single":
-                        if self.buttonmenu.get() == "Left":
-                            pydirectinput.click(button="left")
-                            pydirectinput.PAUSE = self.interval
-                        elif self.buttonmenu.get() == "Middle":
-                            pydirectinput.click(button="middle")
-                            pydirectinput.PAUSE = self.interval
-                        elif self.buttonmenu.get() == "Right":
-                            pydirectinput.click(button="right")
-                            pydirectinput.PAUSE = self.interval
-                        else:
-                            pydirectinput.press(keys=self.buttonmenu.get())
-                            pydirectinput.PAUSE = self.interval
+            pydirectinput.keyDown(target)
 
-                    if clicktype == "Double":
-                        if button1 == "Left":
-                            pydirectinput.doubleClick(button="left")
-                            pydirectinput.PAUSE = self.interval
-                        elif button1 == "Middle":
-                            pydirectinput.doubleClick(button="middle")
-                            pydirectinput.PAUSE = self.interval
-                        elif button1 == "Right":
-                            pydirectinput.doubleClick(button="right")
-                            pydirectinput.PAUSE = self.interval
-                        else:
-                            pydirectinput.press(
-                                keys=self.buttonmenu.get().lower())
-                            pydirectinput.PAUSE = self.interval
+        while not self.stop_event.is_set():
+            time.sleep(0.01)
 
-                    if clicktype == "Triple":
-                        if button1 == "Left":
-                            pydirectinput.tripleClick(button="left")
-                            pydirectinput.PAUSE = self.interval
-                        elif button1 == "Middle":
-                            pydirectinput.tripleClick(button="middle")
-                            pydirectinput.PAUSE = self.interval
-                        elif button1 == "Right":
-                            pydirectinput.tripleClick(button="right")
-                            pydirectinput.PAUSE = self.interval
-                        else:
-                            pydirectinput.press(
-                                keys=self.buttonmenu.get().lower())
-                            pydirectinput.PAUSE = self.interval
+        if target in {"left", "middle", "right"}:
+            pydirectinput.mouseUp(button=target)
+        else:
+            pydirectinput.keyUp(target)
 
-                    if i == int(self.repeattimes.get()):
-                        self.pause = True
+        self.after(0, self.stop_button, True)
 
-                if self.pause:
-                    self.auto1 = False
-                    self.stop_button()
-                    self.autoclc.join()
-                    break
-                lis1.stop()
+    def stop_button(self, from_worker=False):
+        self.stop_event.set()
 
-    def stop_button(self):
-        self.pause = True
+        if not from_worker and self.worker_thread and self.worker_thread.is_alive():
+            self.worker_thread.join(timeout=0.25)
 
-        if clicktype == "Single":
-            if button1 == "Left":
-                self.auto1 = False
-                pydirectinput.mouseUp(button="left")
-            elif button1 == "Middle":
-                self.auto1 = False
-                pydirectinput.mouseUp(button="middle")
-            elif button1 == "Right":
-                self.auto1 = False
-                pydirectinput.mouseUp(button="right")
+        self.running_mode = None
+        self.worker_thread = None
+        self.set_running_ui_state(False)
 
-        if clicktype == "Double":
-            if button1 == "Left":
-                self.auto1 = False
-                pydirectinput.mouseUp(button="left")
-            elif button1 == "Middle":
-                self.auto1 = False
-                pydirectinput.mouseUp(button="middle")
-            elif button1 == "Right":
-                self.auto1 = False
-                pydirectinput.mouseUp(button="right")
+    def load_presets_data(self):
+        if not os.path.exists(self.preset_file):
+            return {}
+        try:
+            with open(self.preset_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            if isinstance(data, dict):
+                return data
+            return {}
+        except (json.JSONDecodeError, OSError):
+            return {}
 
-        if clicktype == "Triple":
-            if button1 == "Left":
-                self.auto1 = False
-                pydirectinput.mouseUp(button="left")
-            elif button1 == "Middle":
-                self.auto1 = False
-                pydirectinput.mouseUp(button="middle")
-            elif button1 == "Right":
-                self.auto1 = False
-                pydirectinput.mouseUp(button="right")
+    def save_presets_data(self, data):
+        with open(self.preset_file, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=2)
 
-        if clicktype == "Hold":
-            if button1 == "Left":
-                self.auto = False
-                pydirectinput.mouseUp(button="left")
-            elif button1 == "Middle":
-                self.auto = False
-                pydirectinput.mouseUp(button="middle")
-            elif button1 == "Right":
-                self.auto = False
-                pydirectinput.mouseUp(button="right")
-            else:
-                pydirectinput.keyUp(button=self.buttonmenu.get().lower())
+    def refresh_presets(self):
+        data = self.load_presets_data()
+        names = sorted(data.keys())
+        if not names:
+            names = ["Select preset"]
+        self.preset_select.configure(values=names)
 
-        self.buttonmenu.configure(state="normal")
-        self.start_auto_button.configure(state="enabled")
-        self.stop_auto_button.configure(state="disabled")
+        if self.preset_selected_var.get() not in names:
+            self.preset_selected_var.set(names[0])
+
+    def snapshot_settings(self):
+        return {
+            "button": self.button_var.get(),
+            "click_type": self.clicktype_var.get(),
+            "keyboard_key": self.keyboard_key_var.get(),
+            "interval": self.interval_var.get(),
+            "delay": self.delay_var.get(),
+            "repeat_mode": self.repeat_mode_var.get(),
+            "repeat_count": str(self.parse_repeat_count()),
+            "theme": self.theme_var.get(),
+            "topmost": bool(self.topmost_var.get()),
+            "hotkey_click": self.hotkey_click_var.get(),
+            "hotkey_hold": self.hotkey_hold_var.get(),
+        }
+
+    def apply_settings(self, settings):
+        self.button_var.set(settings.get("button", "Left"))
+        self.clicktype_var.set(settings.get("click_type", "Single"))
+        self.keyboard_key_var.set(settings.get("keyboard_key", "w"))
+        self.interval_var.set(settings.get("interval", "0.01"))
+        self.delay_var.set(settings.get("delay", "0"))
+        self.repeat_mode_var.set(settings.get("repeat_mode", "Until Stopped"))
+        self.hotkey_click_var.set(settings.get("hotkey_click", "f5"))
+        self.hotkey_hold_var.set(settings.get("hotkey_hold", "f6"))
+        self.apply_hotkeys(show_status=False)
+
+        repeat_count = settings.get("repeat_count", "1")
+        self.repeattimes.set(self.parse_float(repeat_count, 1, minimum=1))
+
+        theme = settings.get("theme", "Dark")
+        self.theme_var.set(theme)
+        self.change_theme(theme)
+
+        topmost = bool(settings.get("topmost", True))
+        self.topmost_var.set(topmost)
+        if topmost:
+            self.topmost_switch.select()
+        else:
+            self.topmost_switch.deselect()
+        self.toggle_topmost()
+
+        self.on_button_change(self.button_var.get())
+
+    def open_credits(self):
+        if self.credits_window is not None and self.credits_window.winfo_exists():
+            self.credits_window.focus()
+            return
+
+        self.credits_window = customtkinter.CTkToplevel(self)
+        self.credits_window.title("Credits")
+        self.credits_window.geometry("430x250")
+        self.credits_window.resizable(False, False)
+        self.credits_window.attributes("-topmost", bool(self.topmost_var.get()))
+
+        frame = customtkinter.CTkFrame(self.credits_window)
+        frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+        customtkinter.CTkLabel(frame, text="Credits", font=("Roboto Medium", 22)).pack(anchor="w", padx=12, pady=(12, 4))
+        customtkinter.CTkLabel(
+            frame,
+            text="This project is based on:\nhttps://github.com/zSynctic/AutoClicker\n\nThis version contains additional improvements.",
+            justify="left",
+            font=("Roboto Medium", 13),
+            wraplength=390,
+        ).pack(anchor="w", padx=12, pady=(0, 10))
+
+        buttons = customtkinter.CTkFrame(frame, fg_color="transparent")
+        buttons.pack(fill="x", padx=12, pady=(0, 12))
+
+        customtkinter.CTkButton(
+            buttons,
+            text="Open Original Repo",
+            command=lambda: webbrowser.open("https://github.com/zSynctic/AutoClicker"),
+        ).pack(side="left")
+
+        customtkinter.CTkButton(buttons, text="Close", command=self.credits_window.destroy).pack(side="right")
+
+    def save_preset(self):
+        name = self.preset_name_var.get().strip()
+        if not name:
+            self.status_var.set("Enter preset name")
+            return
+
+        data = self.load_presets_data()
+        data[name] = self.snapshot_settings()
+        self.save_presets_data(data)
+        self.refresh_presets()
+        self.preset_selected_var.set(name)
+        self.status_var.set("Saved preset")
+
+    def load_preset(self, preset_name):
+        if not preset_name or preset_name == "Select preset":
+            return
+        data = self.load_presets_data()
+        settings = data.get(preset_name)
+        if not settings:
+            self.status_var.set("Preset not found")
+            return
+        self.apply_settings(settings)
+        self.status_var.set(f"Loaded {preset_name}")
 
     def on_close(self, event=0):
+        self.stop_event.set()
+        if self.listener is not None:
+            self.listener.stop()
         self.destroy()
 
     def start(self):
@@ -482,7 +763,4 @@ class App(customtkinter.CTk):
 
 if __name__ == "__main__":
     app = App()
-    app.attributes("-topmost", True)
-    app.resizable(False, False)
-    app.update()
     app.start()

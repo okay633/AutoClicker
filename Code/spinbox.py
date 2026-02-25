@@ -9,13 +9,13 @@ class FloatSpinbox(customtkinter.CTkFrame):
                  height: int = 32,
                  step_size: Union[int, float] = 1,
                  variable=None,
-                 command: Callable = None,
+                 command: Callable = None, # type: ignore
                  **kwargs):
         super().__init__(*args, width=width, height=height, **kwargs)
 
         self.step_size = step_size
         self.command = command
-        self.variable: tkinter.Variable = variable
+        self.variable: tkinter.Variable = variable # type: ignore
 
         self.grid_columnconfigure((0, 2), weight=0)  # buttons don't expand
         self.grid_columnconfigure(1, weight=1)  # entry expands
@@ -63,3 +63,14 @@ class FloatSpinbox(customtkinter.CTkFrame):
     def set(self, value: float):
         self.entry.delete(0, "end")
         self.entry.insert(0, str(float(value)))
+
+    def configure(self, *args, **kwargs):
+        # Allow forwarding a `state` arg to child widgets for enable/disable behavior
+        state = kwargs.pop("state", None)
+        if state is not None:
+            self.entry.configure(state=state)
+            self.add_button.configure(state=state)
+            self.subtract_button.configure(state=state)
+        super().configure(*args, **kwargs)
+
+    config = configure

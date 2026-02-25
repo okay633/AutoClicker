@@ -7,6 +7,12 @@ Official Download Link: [Download](https://github.com/zSynctic/AutoClicker/relea
 
 # What is this AutoClicker?
 
+## Attribution
+
+This version is based on the original project by zSynctic: https://github.com/zSynctic/AutoClicker
+
+This build includes additional improvements on top of that base project.
+
 **AutoClicker is a modern open source program that can automatically click and hold mouse buttons or press keyboard keys so fast.**
 
 # Why use this AutoClicker?
